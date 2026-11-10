@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CYBER SURVIVOR 2077 - 2D Top-Down Survival Shooter (OOP Project)</title>
+    <!-- Nhúng file định dạng giao diện CSS tách biệt -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <!-- Canvas chính dùng để render toàn bộ đồ họa 2D bằng HTML5 Canvas API -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Lớp UI Quản lý HUD và các màn hình trạng thái (State Pattern UI) -->
+    <div id="uiLayer">
+
+        <!-- 1. Thanh HUD khi đang trong trạng thái PLAYING -->
+        <div id="hudTop" style="display: none;">
+            <div class="hud-left interactive">
+                <!-- Thanh Máu (HP) -->
+                <div class="stat-bar-row">
+                    <div class="stat-label">
+                        <span style="color: #ff4d79;">SINH LỰC (HP)</span>
+                        <span id="hpText">100 / 100</span>
+                    </div>
+                    <div class="bar-container">
+                        <div id="hpBarFill" class="bar-fill"></div>
+                    </div>
+                </div>
+
+                <!-- Thanh Kinh Nghiệm (EXP) -->
+                <div class="stat-bar-row">
+                    <div class="stat-label">
+                        <span style="color: var(--neon-cyan);">KINH NGHIỆM (EXP)</span>
+                        <span id="expText">0 / 50</span>
+                    </div>
+                    <div class="bar-container">
+                        <div id="expBarFill" class="bar-fill"></div>
+                    </div>
+                </div>
+
+                <!-- Thông số Cấp độ, Vàng, Điểm số -->
+                <div class="hud-stats-inline">
+                    <span class="badge-level">LV. <span id="levelText">1</span></span>
+                    <span class="badge-gold">VÀNG: <span id="goldText">0</span></span>
+                    <span class="badge-score">ĐIỂM: <span id="scoreText">0</span></span>
+                </div>
+            </div>
+
+            <!-- Đồng hồ sinh tồn & Cảnh báo Boss mỗi 30 giây -->
+            <div class="hud-center">
+                <div id="timerBox">00:00</div>
+                <div id="bossTimerHint">Boss tiếp theo sau: <span id="nextBossCountdown" style="color: var(--neon-red); font-weight: bold;">30s</span></div>
+                <div id="bossWarningBanner">⚠ CẢNH BÁO: BOSS XUẤT HIỆN! ⚠</div>
+            </div>
+
+            <!-- Cụm nút điều khiển nhanh & Bảng Debug báo cáo -->
+            <div class="hud-right interactive">
+                <div class="top-btn-group">
+                    <button id="btnToggleAutoFire" class="cyber-btn-small active-autofire" title="Bật/Tắt tự động bắn theo hướng chuột">
+                        Tự Động Bắn: BẬT
+                    </button>
+                    <button id="btnToggleSound" class="cyber-btn-small" title="Bật/Tắt âm thanh Web Audio API">
+                        Âm Thanh: BẬT
+                    </button>
+                    <button id="btnToggleDebug" class="cyber-btn-small" title="Phím tắt F: Hiển thị Hitbox, Vector hướng đi & FPS">
+                        Bật/Tắt Debug Mode (F)
+                    </button>
+                </div>
+
+                <!-- Bảng Debug Mode dành cho thuyết trình bảo vệ đồ án -->
+                <div id="debugPanel">
+                    <h4>
+                        <span>[DEBUG TELEMETRY]</span>
+                        <span>PHÍM F</span>
+                    </h4>
+                    <div class="debug-row"><span>FPS / Frame Time:</span> <span id="dbgFps" class="debug-val">60 FPS (16.6ms)</span></div>
+                    <div class="debug-row"><span>Trạng thái (State):</span> <span id="dbgState" class="debug-val">PLAYING</span></div>
+                    <div class="debug-row"><span>Tọa độ Player (x, y):</span> <span id="dbgPlayerPos" class="debug-val">0, 0</span></div>
+                    <div class="debug-row"><span>Góc ngắm (Math.atan2):</span> <span id="dbgAimAngle" class="debug-val">0.00 rad</span></div>
+                    <div class="debug-row"><span>Tổng số Object:</span> <span id="dbgTotalObj" class="debug-val">0</span></div>
+                    <div class="debug-row"><span>- Quái vật (Enemies):</span> <span id="dbgEnemyCount" class="debug-val">0</span></div>
+                    <div class="debug-row"><span>- Đạn (Projectiles):</span> <span id="dbgProjCount" class="debug-val">0</span></div>
+                    <div class="debug-row"><span>- Hạt nổ (Particles):</span> <span id="dbgPartCount" class="debug-val">0</span></div>
+                    <div class="debug-row"><span>- Ngọc EXP & Vàng:</span> <span id="dbgLootCount" class="debug-val">0</span></div>
+                    <div class="debug-actions">
+                        <button id="dbgBtnSpawnBoss" class="debug-mini-btn">+ Gọi Boss</button>
+                        <button id="dbgBtnLevelUp" class="debug-mini-btn">+ Lên Cấp</button>
+                        <button id="dbgBtnAddGold" class="debug-mini-btn">+500 Vàng</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Màn hình MENU CHÍNH (State: MENU) -->
+        <div id="menuScreen" class="modal-screen active interactive">
+            <div class="cyber-card">
+                <h1 class="game-title">CYBER SURVIVOR</h1>
+                <p class="game-subtitle">2D Top-Down Survival Shooter • ES6 OOP Architecture</p>
+
+                <div class="menu-records">
+                    <div class="record-box">
+                        <div class="label">Điểm Cao Nhất (High Score)</div>
+                        <div id="menuHighScore" class="value" style="color: var(--neon-cyan);">0</div>
+                    </div>
+                    <div class="record-box">
+                        <div class="label">Tổng Vàng Tích Lũy (Gold)</div>
+                        <div id="menuTotalGold" class="value" style="color: var(--neon-yellow);">0</div>
+                    </div>
+                </div>
+
+                <div class="controls-guide">
+                    <div><span class="key-tag">WASD</span> hoặc <span class="key-tag">Phím Mũi Tên</span> Di chuyển nhân vật</div>
+                    <div><span class="key-tag">Chuột</span> Xoay nòng súng ngắm bắn 360°</div>
+                    <div><span class="key-tag">Click Trái</span> hoặc <span class="key-tag">Tự Động</span> Khai hỏa tiêu diệt quái</div>
+                    <div><span class="key-tag">Phím F</span> Bật/Tắt <b>Debug Mode</b> (Hitbox & Vector)</div>
+                </div>
+
+                <div class="btn-row">
+                    <button id="btnStartGame" class="cyber-btn">▶ BẮT ĐẦU CHIẾN ĐẤU</button>
+                    <button id="btnOpenShop" class="cyber-btn btn-shop">🛒 CỬA HÀNG & TRANG PHỤC</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Màn hình LÊN CẤP (State: LEVEL_UP) -->
+        <div id="levelUpScreen" class="modal-screen interactive">
+            <div class="cyber-card">
+                <h2 class="game-title" style="font-size: 34px; color: var(--neon-green); text-shadow: 0 0 18px var(--neon-green);">
+                    ⚡ THĂNG CẤP! (LEVEL UP) ⚡
+                </h2>
+                <p style="color: var(--text-muted); margin-top: 6px;">
+                    Chọn 1 trong 3 mô-đun nâng cấp vũ khí và sinh tồn bên dưới để tiếp tục trận chiến:
+                </p>
+
+                <div id="upgradeCardsContainer" class="upgrade-grid">
+                    <!-- 3 thẻ nâng cấp ngẫu nhiên sẽ được render động tại đây -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. Màn hình CỬA HÀNG (State: SHOP) -->
+        <div id="shopScreen" class="modal-screen interactive">
+            <div class="cyber-card">
+                <h2 class="game-title" style="font-size: 32px; color: var(--neon-yellow); text-shadow: 0 0 16px var(--neon-yellow);">
+                    CỬA HÀNG CÔNG NGHỆ CYBER
+                </h2>
+                <div class="shop-header-gold">
+                    Số dư Vàng hiện có: <span id="shopGoldDisplay">0</span> 🪙
+                </div>
+
+                <div class="shop-section-title">I. Nâng Cấp Chỉ Số Vĩnh Viễn (Lưu vào LocalStorage)</div>
+                <div id="shopUpgradesGrid" class="shop-grid"></div>
+
+                <div class="shop-section-title">II. Đổi Màu Trang Phục Neon (Cyber Skins)</div>
+                <div id="shopSkinsGrid" class="shop-grid"></div>
+
+                <div class="btn-row" style="margin-top: 18px;">
+                    <button id="btnCloseShop" class="cyber-btn">⬅ QUAY LẠI MENU CHÍNH</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. Màn hình KẾT THÚC (State: GAME_OVER) -->
+        <div id="gameOverScreen" class="modal-screen interactive">
+            <div class="cyber-card">
+                <h2 class="game-title" style="font-size: 42px; color: var(--neon-pink); text-shadow: 0 0 22px var(--neon-pink);">
+                    NHIỆM VỤ THẤT BẠI
+                </h2>
+                <p class="game-subtitle">HỆ THỐNG CHIẾN ĐẤU ĐÃ NGỪNG HOẠT ĐỘNG</p>
+
+                <div class="menu-records">
+                    <div class="record-box">
+                        <div class="label">Điểm Trận Này</div>
+                        <div id="overScore" class="value" style="color: var(--neon-cyan);">0</div>
+                    </div>
+                    <div class="record-box">
+                        <div class="label">Kỷ Lục Cao Nhất</div>
+                        <div id="overHighScore" class="value" style="color: var(--neon-green);">0</div>
+                    </div>
+                    <div class="record-box">
+                        <div class="label">Vàng Thu Thập</div>
+                        <div id="overGoldEarned" class="value" style="color: var(--neon-yellow);">+0</div>
+                    </div>
+                    <div class="record-box">
+                        <div class="label">Thời Gian Sinh Tồn</div>
+                        <div id="overTimeSurvived" class="value" style="color: #fff;">00:00</div>
+                    </div>
+                </div>
+
+                <div class="btn-row">
+                    <button id="btnRestartGame" class="cyber-btn">🔄 CHƠI LẠI NGAY</button>
+                    <button id="btnGameOverToShop" class="cyber-btn btn-shop">🛒 VÀO CỬA HÀNG</button>
+                    <button id="btnGameOverToMenu" class="cyber-btn btn-danger">🏠 VỀ MENU CHÍNH</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ==========================================================================
+         NHÚNG CÁC FILE JAVASCRIPT THEO ĐÚNG THỨ TỰ PHỤ THUỘC (DEPENDENCY ORDER)
+         Lưu ý: Không dùng type="module" để chạy trực tiếp bằng giao thức file://
+         mà không bị trình duyệt chặn bởi chính sách bảo mật CORS.
+         ========================================================================== -->
+    <!-- 1. Thư viện hàm toán học & kiểm tra va chạm -->
+    <script src="js/math.js"></script>
+    <!-- 2. Lớp quản lý âm thanh Web Audio API -->
+    <script src="js/audio.js"></script>
+    <!-- 3. Lớp cha cơ sở Entity (phải được nạp trước tất cả các lớp con kế thừa nó) -->
+    <script src="js/Entity.js"></script>
+    <!-- 4. Lớp Đạn (Projectile) và Hiệu ứng hạt nổ (Particle) kế thừa từ Entity -->
+    <script src="js/Projectile.js"></script>
+    <!-- 5. Lớp Vật phẩm rơi (ExperienceGem & GoldCoin) kế thừa từ Entity -->
+    <script src="js/DropItem.js"></script>
+    <!-- 6. Lớp Nhân vật chính (Player) kế thừa từ Entity -->
+    <script src="js/Player.js"></script>
+    <!-- 7. Lớp Quái vật (Enemy) và 3 lớp con đa hình (FastEnemy, TankEnemy, BossEnemy) -->
+    <script src="js/Enemy.js"></script>
+    <!-- 8. Lớp Game quản lý vòng lặp chính, State Pattern, Shop và Debug Mode -->
+    <script src="js/Game.js"></script>
+    <!-- 9. File khởi tạo đối tượng Game, lắng nghe sự kiện và chạy gameLoop -->
+    <script src="js/main.js"></script>
+</body>
+</html>

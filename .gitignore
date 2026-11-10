@@ -1,0 +1,25 @@
+# Hệ điều hành (macOS / Windows / Linux)
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# Trình soạn thảo mã nguồn (IDE / Editors)
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Thư mục phụ thuộc & bản dựng (nếu có)
+node_modules/
+dist/
+build/
+
+# File nhật ký & biến môi trường
+*.log
+npm-debug.log*
+.env
+.env.local
+.env.*.local
