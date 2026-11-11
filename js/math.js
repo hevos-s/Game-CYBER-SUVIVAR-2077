@@ -2,8 +2,9 @@
  * ============================================================================
  * FILE: js/math.js
  * MÔ TẢ: Thư viện các hàm toán học 2D cốt lõi phục vụ tính toán Vector,
- *        khoảng cách Euclid, góc lượng giác và phát hiện va chạm hình tròn.
- * LƯU Ý: Không dùng import/export để chạy trực tiếp qua giao thức file://
+ *        khoảng cách Euclid, góc lượng giác, phát hiện va chạm hình tròn
+ *        và tìm kiếm mục tiêu gần nhất (Smart Auto-Aim cho Mobile).
+ * LƯU Ý: Không dùng cú pháp ES6 Modules để chạy trực tiếp qua giao thức file://
  *        mà không bị chặn bởi lỗi CORS trên trình duyệt.
  * ============================================================================
  */
@@ -14,6 +15,7 @@
  * Ứng dụng:
  * - Tính khoảng cách từ Ngọc EXP / Vàng tới Player để kích hoạt lực hút từ trường.
  * - Tính khoảng cách giữa tâm 2 thực thể để xét va chạm hình tròn.
+ * - Tìm con Enemy gần Player nhất cho cơ chế Auto-Aim thông minh trên Mobile.
  *
  * @param {number} x1 - Hoành độ điểm thứ nhất
  * @param {number} y1 - Tung độ điểm thứ nhất
@@ -30,7 +32,7 @@ function calculateDistance(x1, y1, x2, y2) {
  * Công thức lượng giác: θ = Math.atan2(y2 - y1, x2 - x1)
  * Giá trị trả về nằm trong khoảng [-π, π] (đơn vị Radian).
  * Ứng dụng:
- * - Xoay nòng súng của Player hướng chính xác về phía con trỏ chuột.
+ * - Xoay nòng súng của Player hướng chính xác về phía con trỏ chuột hoặc hướng kéo Joystick.
  * - Tính góc để Quái vật (Enemy) luôn di chuyển đuổi theo tọa độ của Player.
  * - Tính góc bắn đạn của BossEnemy về phía Player.
  *
@@ -82,7 +84,37 @@ function checkCircleCollision(entityA, entityB) {
 }
 
 /**
- * 5. GIỚI HẠN GIÁ TRỊ TRONG ĐOẠN [min, max] (CLAMP)
+ * 5. TÌM QUÁI VẬT GẦN NHẤT CHO CƠ CHẾ SMART AUTO-AIM TRÊN MOBILE
+ * Duyệt qua danh sách quái vật hiện có, tính khoảng cách Euclid từ vị trí (x, y) của Player
+ * tới từng con quái và trả về thực thể Enemy có khoảng cách nhỏ nhất (Nearest Neighbor O(N)).
+ *
+ * @param {number} x - Hoành độ của Player
+ * @param {number} y - Tung độ của Player
+ * @param {Array<Enemy>} enemies - Mảng các quái vật đang hoạt động
+ * @returns {Enemy|null} Quái vật gần nhất hoặc null nếu không có quái
+ */
+function findNearestEnemy(x, y, enemies) {
+    if (!enemies || enemies.length === 0) return null;
+
+    let nearest = null;
+    let minDistance = Infinity;
+
+    for (let i = 0; i < enemies.length; i++) {
+        const enemy = enemies[i];
+        if (enemy.markedForDeletion) continue;
+
+        const dist = calculateDistance(x, y, enemy.x, enemy.y);
+        if (dist < minDistance) {
+            minDistance = dist;
+            nearest = enemy;
+        }
+    }
+
+    return nearest;
+}
+
+/**
+ * 6. GIỚI HẠN GIÁ TRỊ TRONG ĐOẠN [min, max] (CLAMP)
  * Ứng dụng: Giữ tọa độ (x, y) của Player không bao giờ vượt ra khỏi khung hình Canvas.
  *
  * @param {number} value - Giá trị cần giới hạn
@@ -95,7 +127,7 @@ function clamp(value, min, max) {
 }
 
 /**
- * 6. CHUYỂN ĐỔI GÓC TỪ RADIAN SANG ĐỘ (DEGREE)
+ * 7. CHUYỂN ĐỔI GÓC TỪ RADIAN SANG ĐỘ (DEGREE)
  * Công thức: deg = rad * (180 / π)
  * Ứng dụng: Hiển thị góc ngắm dễ đọc trên bảng thông số Debug Mode khi thuyết trình.
  *
@@ -105,4 +137,3 @@ function clamp(value, min, max) {
 function radToDeg(rad) {
     return (rad * 180) / Math.PI;
 }
-

@@ -2,6 +2,10 @@
  * ============================================================================
  * FILE: js/Game.js
  * MÔ TẢ: Định nghĩa lớp Game đóng vai trò là Bộ điều khiển trung tâm (Game Engine).
+ *        Đã nâng cấp hỗ trợ đa nền tảng:
+ *        - PC: Bàn phím WASD / Mũi tên + Chuột.
+ *        - Mobile / Tablet: Hệ thống 2 Cần gạt ảo cảm ứng đa điểm (Virtual Joysticks)
+ *          kết hợp cơ chế Smart Auto-Aim tự động khóa mục tiêu gần nhất.
  * TÍNH CHẤT HƯỚNG ĐỐI TƯỢNG & MẪU THIẾT KẾ (DESIGN PATTERNS) ĐỂ BÁO CÁO:
  * 1. Tính Đóng Gói & Hợp Thành (Encapsulation & Composition):
  *    - Lớp `Game` chứa và điều phối các đối tượng thành phần: `Player`, mảng `enemies`,
@@ -9,8 +13,6 @@
  * 2. Mẫu Thiết Kế Trạng Thái (State Pattern):
  *    - Quản lý 5 trạng thái tách biệt thông qua thuộc tính `this.state`:
  *      `MENU`, `PLAYING`, `LEVEL_UP`, `SHOP`, `GAME_OVER`.
- *    - Khi ở trạng thái `LEVEL_UP`, `MENU`, `SHOP` hoặc `GAME_OVER`, hàm `updatePlaying(dt)`
- *      tự động tạm dừng, đảm bảo quái vật không tấn công khi người chơi đang chọn nâng cấp.
  * 3. Lưu Trữ Bền Vững (Data Persistence với Web Storage API):
  *    - Đọc và ghi Điểm cao nhất (`highScore`), Tổng số vàng (`totalGold`), cấp độ nâng cấp
  *      vĩnh viễn (`upgrades`) và trang phục (`selectedSkin`) vào `localStorage`.
@@ -21,7 +23,6 @@ class Game {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
-        this.resizeCanvas();
 
         // Khởi tạo bộ quản lý âm thanh Web Audio API (từ js/audio.js)
         this.sound = new SoundManager();
@@ -40,13 +41,50 @@ class Game {
         this.debugMode = false;
         this.autoFire = true;
 
-        // Trạng thái bàn phím và chuột (được cập nhật từ js/main.js)
+        // Trạng thái bàn phím và chuột trên PC (được cập nhật từ js/main.js)
         this.keys = {};
         this.mouse = {
             x: window.innerWidth / 2,
             y: window.innerHeight / 2,
             isDown: false
         };
+
+        // Tự động nhận diện thiết bị cảm ứng hoặc màn hình nhỏ để kích hoạt Virtual Joystick
+        const isTouchCapable =
+            'ontouchstart' in window ||
+            navigator.maxTouchPoints > 0 ||
+            window.innerWidth <= 900;
+
+        this.touchInput = {
+            isTouchDevice: isTouchCapable,
+            // Cần gạt bên trái: Điều khiển di chuyển nhân vật (Movement Joystick)
+            moveJoystick: {
+                active: false,
+                touchId: null,
+                baseX: 0,
+                baseY: 0,
+                stickX: 0,
+                stickY: 0,
+                vx: 0,
+                vy: 0,
+                maxRadius: 55
+            },
+            // Cần gạt bên phải: Điều khiển hướng ngắm bắn (Aim & Shoot Joystick)
+            aimJoystick: {
+                active: false,
+                touchId: null,
+                baseX: 0,
+                baseY: 0,
+                stickX: 0,
+                stickY: 0,
+                vx: 0,
+                vy: 0,
+                angle: 0,
+                maxRadius: 55
+            }
+        };
+
+        this.resizeCanvas();
 
         // Khởi tạo và đọc dữ liệu đã lưu từ localStorage
         this.storageKey = 'CYBER_SURVIVOR_SAVE_DATA_V1';
@@ -103,6 +141,21 @@ class Game {
     start() {
         this.lastFrameTime = performance.now();
         requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+    }
+
+    /**
+     * Đặt lại trạng thái 2 cần gạt cảm ứng khi tạm dừng hoặc chuyển màn hình
+     */
+    resetTouchJoysticks() {
+        this.touchInput.moveJoystick.active = false;
+        this.touchInput.moveJoystick.touchId = null;
+        this.touchInput.moveJoystick.vx = 0;
+        this.touchInput.moveJoystick.vy = 0;
+
+        this.touchInput.aimJoystick.active = false;
+        this.touchInput.aimJoystick.touchId = null;
+        this.touchInput.aimJoystick.vx = 0;
+        this.touchInput.aimJoystick.vy = 0;
     }
 
     /**
@@ -176,10 +229,14 @@ class Game {
 
     /**
      * Tự động điều chỉnh độ phân giải Canvas khớp với kích thước cửa sổ trình duyệt
+     * và kiểm tra lại kích thước màn hình để bật giao diện Joystick cho màn hình nhỏ
      */
     resizeCanvas() {
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
+        if (this.touchInput && window.innerWidth <= 900) {
+            this.touchInput.isTouchDevice = true;
+        }
     }
 
     /**
@@ -199,6 +256,10 @@ class Game {
      */
     changeState(newState) {
         this.state = newState;
+
+        if (newState !== this.STATES.PLAYING) {
+            this.resetTouchJoysticks();
+        }
 
         // Ẩn tất cả các màn hình Modal trước
         document.getElementById('menuScreen').classList.remove('active');
@@ -602,9 +663,28 @@ class Game {
             this.spawnEnemy();
         }
 
-        // 3. Cập nhật Player và khai hỏa khi nhấn chuột trái hoặc bật chế độ Tự Động Bắn
-        this.player.update(dt, this.keys, this.mouse, this.canvas.width, this.canvas.height);
-        if (this.mouse.isDown || this.autoFire) {
+        // 3. Cập nhật Player (hỗ trợ cả WASD+Chuột trên PC và Dual Joystick + Auto-Aim trên Mobile)
+        this.player.update(
+            dt,
+            this.keys,
+            this.mouse,
+            this.canvas.width,
+            this.canvas.height,
+            this.touchInput,
+            this.enemies
+        );
+
+        // Kiểm tra điều kiện khai hỏa:
+        // - Khi nhấn chuột trái hoặc bật Tự Động Bắn
+        // - Hoặc khi kéo cần gạt ngắm bắn bên phải trên Mobile
+        // - Hoặc khi kéo cần gạt di chuyển bên trái trên Mobile và có Enemy trong tầm Auto-Aim
+        const shouldShoot =
+            this.mouse.isDown ||
+            this.autoFire ||
+            this.touchInput.aimJoystick.active ||
+            (this.touchInput.moveJoystick.active && this.enemies.length > 0);
+
+        if (shouldShoot) {
             this.player.shoot(this.projectiles, this.sound);
         }
 
@@ -779,7 +859,139 @@ class Game {
     }
 
     /**
-     * Vẽ toàn bộ các thực thể trong thế giới Game và lớp phủ Debug Mode lên Canvas
+     * Vẽ vòng tròn khóa mục tiêu tự động (Smart Auto-Aim Reticle) trên Mobile
+     * @param {CanvasRenderingContext2D} ctx
+     */
+    drawAutoAimReticle(ctx) {
+        if (!this.player || !this.player.autoAimTarget) return;
+        const target = this.player.autoAimTarget;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(target.x, target.y, target.radius + 9, 0, Math.PI * 2);
+        ctx.strokeStyle = '#00ff66';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 4]);
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = '#00ff66';
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    /**
+     * Vẽ trực quan 2 cần gạt ảo (Virtual Joysticks) trên màn hình cảm ứng Mobile/Tablet:
+     * - Bên trái: Movement Joystick (màu Cyan #00f3ff)
+     * - Bên phải: Aim & Shoot Joystick (màu Hồng Neon #ff0055)
+     * @param {CanvasRenderingContext2D} ctx
+     */
+    drawVirtualJoysticks(ctx) {
+        if (this.state !== this.STATES.PLAYING) return;
+        const { isTouchDevice, moveJoystick, aimJoystick } = this.touchInput;
+        if (!isTouchDevice && !moveJoystick.active && !aimJoystick.active) return;
+
+        // Hàm con vẽ 1 Joystick với vòng đế lớn và núm gạt bên trong
+        const renderJoystick = (baseX, baseY, stickX, stickY, maxRadius, color, label, isActive) => {
+            ctx.save();
+            ctx.globalAlpha = isActive ? 0.85 : 0.32;
+
+            // Vòng tròn đế Joystick (Outer Base Ring)
+            ctx.beginPath();
+            ctx.arc(baseX, baseY, maxRadius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(8, 14, 30, 0.55)';
+            ctx.fill();
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = color;
+            ctx.shadowBlur = isActive ? 16 : 6;
+            ctx.shadowColor = color;
+            ctx.stroke();
+
+            // Đường nối từ tâm đế tới núm gạt
+            if (isActive) {
+                ctx.beginPath();
+                ctx.moveTo(baseX, baseY);
+                ctx.lineTo(stickX, stickY);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            // Núm gạt ngón tay cái (Inner Thumb Stick)
+            ctx.beginPath();
+            ctx.arc(stickX, stickY, 22, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.shadowBlur = 18;
+            ctx.shadowColor = color;
+            ctx.fill();
+
+            // Nhãn hướng dẫn bên dưới cần gạt
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#e2f1ff';
+            ctx.font = 'bold 11px Segoe UI, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, baseX, baseY + maxRadius + 18);
+
+            ctx.restore();
+        };
+
+        // Vị trí mặc định khi chưa chạm ngón tay ở 2 góc dưới màn hình
+        const defaultLeftX = 95;
+        const defaultLeftY = this.canvas.height - 105;
+        const defaultRightX = this.canvas.width - 95;
+        const defaultRightY = this.canvas.height - 105;
+
+        // 1. Vẽ Cần gạt di chuyển bên trái (Movement Joystick)
+        if (moveJoystick.active) {
+            renderJoystick(
+                moveJoystick.baseX,
+                moveJoystick.baseY,
+                moveJoystick.stickX,
+                moveJoystick.stickY,
+                moveJoystick.maxRadius,
+                '#00f3ff',
+                'DI CHUYỂN',
+                true
+            );
+        } else {
+            renderJoystick(
+                defaultLeftX,
+                defaultLeftY,
+                defaultLeftX,
+                defaultLeftY,
+                moveJoystick.maxRadius,
+                '#00f3ff',
+                'DI CHUYỂN',
+                false
+            );
+        }
+
+        // 2. Vẽ Cần gạt ngắm bắn bên phải (Aim & Shoot Joystick)
+        if (aimJoystick.active) {
+            renderJoystick(
+                aimJoystick.baseX,
+                aimJoystick.baseY,
+                aimJoystick.stickX,
+                aimJoystick.stickY,
+                aimJoystick.maxRadius,
+                '#ff0055',
+                'NGẮM BẮN',
+                true
+            );
+        } else {
+            renderJoystick(
+                defaultRightX,
+                defaultRightY,
+                defaultRightX,
+                defaultRightY,
+                aimJoystick.maxRadius,
+                '#ff0055',
+                'NGẮM / AUTO-AIM',
+                false
+            );
+        }
+    }
+
+    /**
+     * Vẽ toàn bộ các thực thể trong thế giới Game, Virtual Joysticks và lớp phủ Debug Mode
      */
     drawWorld() {
         const ctx = this.ctx;
@@ -813,6 +1025,9 @@ class Game {
         // Vẽ Quái vật (Đa hình: mỗi lớp con tự gọi hàm draw riêng)
         this.enemies.forEach((enemy) => enemy.draw(ctx));
 
+        // Vẽ vòng khóa mục tiêu tự động (Smart Auto-Aim) trên Mobile
+        this.drawAutoAimReticle(ctx);
+
         // Vẽ Nhân vật chính (Player)
         this.player.draw(ctx);
 
@@ -831,10 +1046,12 @@ class Game {
             ctx.setLineDash([6, 6]);
             ctx.stroke();
 
-            // Vẽ tia ngắm từ tâm Player tới con trỏ chuột minh họa góc Math.atan2
+            // Vẽ tia ngắm từ tâm Player theo hướng bắn (Chuột hoặc Auto-Aim / Joystick)
+            const aimLineX = this.player.x + Math.cos(this.player.aimAngle) * 260;
+            const aimLineY = this.player.y + Math.sin(this.player.aimAngle) * 260;
             ctx.beginPath();
             ctx.moveTo(this.player.x, this.player.y);
-            ctx.lineTo(this.mouse.x, this.mouse.y);
+            ctx.lineTo(aimLineX, aimLineY);
             ctx.strokeStyle = 'rgba(0, 255, 102, 0.6)';
             ctx.setLineDash([3, 3]);
             ctx.stroke();
@@ -851,10 +1068,13 @@ class Game {
         }
 
         ctx.restore();
+
+        // Vẽ 2 Cần gạt ảo (Virtual Joysticks) cố định trên màn hình (không bị ảnh hưởng bởi Screen Shake)
+        this.drawVirtualJoysticks(ctx);
     }
 
     /**
-     * Cập nhật bảng thông số kỹ thuật Debug Telemetry (FPS, Số lượng Object, Góc ngắm)
+     * Cập nhật bảng thông số kỹ thuật Debug Telemetry (FPS, Số lượng Object, Góc ngắm, Chế độ Input)
      */
     updateDebugTelemetry() {
         if (!this.debugMode) return;
@@ -870,6 +1090,14 @@ class Game {
 
         document.getElementById('dbgFps').textContent = `${this.fps} FPS (${this.frameTimeMs.toFixed(1)}ms)`;
         document.getElementById('dbgState').textContent = this.state;
+
+        const inputLabel = this.touchInput.isTouchDevice
+            ? 'Mobile (Dual Joystick + Auto-Aim)'
+            : 'PC (WASD + Mouse)';
+        const dbgInputEl = document.getElementById('dbgInputMode');
+        if (dbgInputEl) {
+            dbgInputEl.textContent = inputLabel;
+        }
 
         if (this.player) {
             document.getElementById('dbgPlayerPos').textContent = `${Math.round(this.player.x)}, ${Math.round(this.player.y)}`;
@@ -914,4 +1142,3 @@ class Game {
         requestAnimationFrame((nextTimestamp) => this.gameLoop(nextTimestamp));
     }
 }
-

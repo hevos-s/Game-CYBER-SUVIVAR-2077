@@ -2,6 +2,11 @@
  * ============================================================================
  * FILE: js/Player.js
  * MÔ TẢ: Định nghĩa lớp Player (Nhân vật người chơi chính).
+ *        Hỗ trợ điều khiển đa nền tảng (Cross-Platform Input):
+ *        - Trên PC: Bàn phím WASD / Phím Mũi Tên kết hợp ngắm bắn bằng Chuột.
+ *        - Trên Mobile / Tablet: Cần gạt ảo bên trái (Movement Joystick) để di chuyển
+ *          360 độ mượt mà, kết hợp Cần gạt ngắm bắn bên phải (Aim Joystick) HOẶC
+ *          cơ chế Smart Auto-Aim tự động khóa mục tiêu vào con Enemy gần nhất.
  * TÍNH CHẤT HƯỚNG ĐỐI TƯỢNG (OOP) ĐỂ BÁO CÁO:
  * 1. Tính Kế Thừa (Inheritance):
  *    - `Player` kế thừa từ lớp cha `Entity` (`class Player extends Entity`),
@@ -13,7 +18,7 @@
  *      Tốc độ bắn (`fireDelay`), Số tia đạn (`projectileCount`) và Tầm hút (`magnetRadius`).
  * 3. Tính Đa Hình (Polymorphism):
  *    - Ghi đè phương thức `draw(ctx)` để vẽ nhân vật Cyberpunk cùng nòng súng xoay 360 độ
- *      theo góc ngắm chuột (`aimAngle`) bằng phép biến đổi hệ trục `ctx.translate` và `ctx.rotate`.
+ *      theo góc ngắm (`aimAngle`) bằng phép biến đổi hệ trục `ctx.translate` và `ctx.rotate`.
  * ============================================================================
  */
 
@@ -44,46 +49,88 @@ class Player extends Entity {
         this.maxExp = 40;
         this.gold = 0;
 
-        // Góc xoay nòng súng hướng về chuột (tính bằng Radian)
+        // Góc xoay nòng súng (tính bằng Radian) và mục tiêu khóa tự động trên Mobile
         this.aimAngle = 0;
+        this.autoAimTarget = null;
 
         // Thời gian miễn nhiễm sát thương ngắn sau khi bị quái chạm (0.45s)
         this.invulnerableTimer = 0;
     }
 
     /**
-     * Cập nhật vị trí người chơi và hướng xoay nòng súng mỗi khung hình
+     * Cập nhật vị trí người chơi và hướng xoay nòng súng mỗi khung hình (Hỗ trợ cả PC và Mobile)
      * @param {number} dt - Delta Time (giây)
      * @param {Object} keys - Trạng thái các phím đang nhấn (WASD / Arrow Keys)
      * @param {Object} mouse - Tọa độ chuột {x, y, isDown}
      * @param {number} canvasWidth - Chiều rộng màn hình Canvas
      * @param {number} canvasHeight - Chiều cao màn hình Canvas
+     * @param {Object} touchInput - Trạng thái 2 cần gạt cảm ứng {isTouchDevice, moveJoystick, aimJoystick}
+     * @param {Array<Enemy>} enemies - Danh sách quái vật hiện có (phục vụ Smart Auto-Aim)
      */
-    update(dt, keys, mouse, canvasWidth, canvasHeight) {
-        // 1. Xử lý vector di chuyển từ bàn phím (WASD hoặc Phím Mũi Tên)
+    update(dt, keys, mouse, canvasWidth, canvasHeight, touchInput = null, enemies = []) {
+        // ====================================================================
+        // 1. XỬ LÝ DI CHUYỂN: KẾT HỢP VIRTUAL JOYSTICK TRÁI (MOBILE) & WASD (PC)
+        // ====================================================================
         let moveX = 0;
         let moveY = 0;
 
-        if (keys['KeyW'] || keys['ArrowUp']) moveY -= 1;
-        if (keys['KeyS'] || keys['ArrowDown']) moveY += 1;
-        if (keys['KeyA'] || keys['ArrowLeft']) moveX -= 1;
-        if (keys['KeyD'] || keys['ArrowRight']) moveX += 1;
+        if (touchInput && touchInput.moveJoystick.active) {
+            // Trên Mobile: Lấy trực tiếp vector analog (vx, vy) từ Cần gạt di chuyển bên trái
+            moveX = touchInput.moveJoystick.vx;
+            moveY = touchInput.moveJoystick.vy;
 
-        // Chuẩn hóa vector chuyển động bằng hàm normalizeVector trong js/math.js:
-        // Đảm bảo khi đi chéo (giữ 2 phím cùng lúc) tốc độ không bị vượt quá speed chuẩn.
-        if (moveX !== 0 || moveY !== 0) {
-            const unitVec = normalizeVector(moveX, moveY);
-            this.x += unitVec.x * this.speed * dt;
-            this.y += unitVec.y * this.speed * dt;
+            this.x += moveX * this.speed * dt;
+            this.y += moveY * this.speed * dt;
+        } else {
+            // Trên PC: Đọc trạng thái bàn phím WASD hoặc Phím Mũi Tên
+            if (keys['KeyW'] || keys['ArrowUp']) moveY -= 1;
+            if (keys['KeyS'] || keys['ArrowDown']) moveY += 1;
+            if (keys['KeyA'] || keys['ArrowLeft']) moveX -= 1;
+            if (keys['KeyD'] || keys['ArrowRight']) moveX += 1;
+
+            // Chuẩn hóa vector chuyển động bằng hàm normalizeVector trong js/math.js:
+            // Đảm bảo khi đi chéo (giữ 2 phím cùng lúc) tốc độ không bị vượt quá speed chuẩn.
+            if (moveX !== 0 || moveY !== 0) {
+                const unitVec = normalizeVector(moveX, moveY);
+                this.x += unitVec.x * this.speed * dt;
+                this.y += unitVec.y * this.speed * dt;
+            }
         }
 
         // Giới hạn nhân vật không đi ra ngoài biên của Canvas bằng hàm clamp trong js/math.js
         this.x = clamp(this.x, this.radius, canvasWidth - this.radius);
         this.y = clamp(this.y, this.radius, canvasHeight - this.radius);
 
-        // 2. Tính góc xoay của nòng súng hướng về con trỏ chuột bằng hàm calculateAngle (Math.atan2):
-        // Công thức: θ = Math.atan2(mouse.y - this.y, mouse.x - this.x)
-        this.aimAngle = calculateAngle(this.x, this.y, mouse.x, mouse.y);
+        // ====================================================================
+        // 2. XỬ LÝ XOAY NÒNG SÚNG: JOYSTICK PHẢI / SMART AUTO-AIM (MOBILE) & CHUỘT (PC)
+        // ====================================================================
+        this.autoAimTarget = null;
+
+        if (
+            touchInput &&
+            touchInput.aimJoystick.active &&
+            Math.hypot(touchInput.aimJoystick.vx, touchInput.aimJoystick.vy) > 0.08
+        ) {
+            // Ưu tiên 1 (Mobile): Người chơi chủ động kéo Cần gạt ngắm bắn bên phải
+            this.aimAngle = touchInput.aimJoystick.angle;
+        } else if (touchInput && touchInput.isTouchDevice) {
+            // Ưu tiên 2 (Mobile Smart Auto-Aim): Khi người chơi chỉ kéo di chuyển bên trái,
+            // súng tự động tìm và xoay về phía con Enemy gần nhất để giảm thao tác rườm rà.
+            const nearestEnemy = findNearestEnemy(this.x, this.y, enemies);
+            if (nearestEnemy) {
+                this.autoAimTarget = nearestEnemy;
+                this.aimAngle = calculateAngle(this.x, this.y, nearestEnemy.x, nearestEnemy.y);
+            } else if (
+                touchInput.moveJoystick.active &&
+                Math.hypot(touchInput.moveJoystick.vx, touchInput.moveJoystick.vy) > 0.08
+            ) {
+                // Nếu trên màn hình chưa có quái, nòng súng xoay theo hướng đang di chuyển
+                this.aimAngle = Math.atan2(touchInput.moveJoystick.vy, touchInput.moveJoystick.vx);
+            }
+        } else {
+            // Ưu tiên 3 (PC): Xoay nòng súng hướng về con trỏ chuột bằng hàm calculateAngle (Math.atan2)
+            this.aimAngle = calculateAngle(this.x, this.y, mouse.x, mouse.y);
+        }
 
         // 3. Cập nhật bộ đếm thời gian nạp đạn và miễn nhiễm sát thương
         if (this.fireTimer > 0) {
@@ -95,7 +142,7 @@ class Player extends Entity {
     }
 
     /**
-     * Khai hỏa bắn đạn về phía con trỏ chuột (Hỗ trợ bắn đơn tia hoặc nhiều tia tỏa hình quạt)
+     * Khai hỏa bắn đạn theo góc ngắm hiện tại (Hỗ trợ bắn đơn tia hoặc nhiều tia tỏa hình quạt)
      * @param {Array<Projectile>} projectiles - Mảng chứa các viên đạn của Game
      * @param {SoundManager} sound - Đối tượng phát âm thanh Web Audio API
      */
@@ -151,7 +198,7 @@ class Player extends Entity {
     }
 
     /**
-     * Ghi đè phương thức draw: Vẽ nhân vật Cyberpunk phát sáng cùng tháp súng xoay theo chuột
+     * Ghi đè phương thức draw: Vẽ nhân vật Cyberpunk phát sáng cùng tháp súng xoay theo góc ngắm
      * @param {CanvasRenderingContext2D} ctx
      */
     draw(ctx) {
@@ -198,4 +245,3 @@ class Player extends Entity {
         ctx.restore();
     }
 }
-
